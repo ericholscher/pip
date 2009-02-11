@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import sys
 import os
+import errno
+import stat
 import optparse
 import pkg_resources
 import urllib2
@@ -54,8 +56,10 @@ default_timeout = 15
 # Choose a Git command based on platform.
 if sys.platform == 'win32':
     GIT_CMD = 'git.cmd'
+    BZR_CMD = 'bzr.bat'
 else:
     GIT_CMD = 'git'
+    BZR_CMD = 'bzr'
 
 ## FIXME: this shouldn't be a module setting
 default_vcs = None
@@ -71,6 +75,13 @@ except pkg_resources.DistributionNotFound:
     # when running pip.py without installing
     version=None
 
+def rmtree_errorhandler(func, path, exc_info):
+  typ, val, tb = exc_info
+  if issubclass(typ, OSError) and val.errno == errno.EACCES:
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+  else:
+    raise typ, val, tb
 
 class VcsSupport(object):
     _registry = {}
@@ -961,7 +972,9 @@ def restart_in_venv(venv, args):
     file = __file__
     if file.endswith('.pyc'):
         file = file[:-1]
-    os.execv(python, [python, file] + args + [base, '___VENV_RESTART___'])
+    call_subprocess([python, file] + args + [base, '___VENV_RESTART___'])
+    sys.exit(0)
+    #~ os.execv(python, )
 
 class PackageFinder(object):
     """This finds packages.
@@ -1555,10 +1568,10 @@ execfile(__file__)
         if self.is_bundle or os.path.exists(self.delete_marker_filename):
             logger.info('Removing source in %s' % self.source_dir)
             if self.source_dir:
-                shutil.rmtree(self.source_dir)
+                shutil.rmtree(self.source_dir, ignore_errors=True, onerror=rmtree_errorhandler)
             self.source_dir = None
             if self._temp_build_dir and os.path.exists(self._temp_build_dir):
-                shutil.rmtree(self._temp_build_dir)
+                shutil.rmtree(self._temp_build_dir, ignore_errors=True, onerror=rmtree_errorhandler)
             self._temp_build_dir = None
 
     def install_editable(self):
@@ -2517,7 +2530,7 @@ class Subversion(VersionControl):
             if os.path.exists(location):
                 # Subversion doesn't like to check out over an existing directory
                 # --force fixes this, but was only added in svn 1.5
-                os.rmdir(location)
+                shutil.rmtree(location, onerror=rmtree_errorhandler)
             call_subprocess(
                 ['svn', 'checkout', url, location],
                 filter_stdout=self._filter, show_stdout=False)
@@ -3109,7 +3122,7 @@ class Bazaar(VersionControl):
             if os.path.exists(location):
                 os.rmdir(location)
             call_subprocess(
-                ['bzr', 'branch', url, location],
+                [BZR_CMD, 'branch', url, location],
                 filter_stdout=self._filter, show_stdout=False)
         finally:
             logger.indent -= 2
@@ -3142,7 +3155,7 @@ class Bazaar(VersionControl):
                 if response == 's':
                     logger.notify('Switching branch %s to %s%s'
                                   % (display_path(dest), url, rev_display))
-                    call_subprocess(['bzr', 'switch', url], cwd=dest)
+                    call_subprocess([BZR_CMD, 'switch', url], cwd=dest)
                 elif response == 'i':
                     # do nothing
                     pass
@@ -3164,14 +3177,14 @@ class Bazaar(VersionControl):
                 url = 'bzr+' + url
             if update:
                 call_subprocess(
-                    ['bzr', 'pull', '-q'] + rev_options + [url], cwd=dest)
+                    [BZR_CMD, 'pull', '-q'] + rev_options + [url], cwd=dest)
             else:
                 call_subprocess(
-                    ['bzr', 'branch', '-q'] + rev_options + [url, dest])
+                    [BZR_CMD, 'branch', '-q'] + rev_options + [url, dest])
 
     def get_url(self, location):
         urls = call_subprocess(
-            ['bzr', 'info'], show_stdout=False, cwd=location)
+            [BZR_CMD, 'info'], show_stdout=False, cwd=location)
         for line in urls.splitlines():
             line = line.strip()
             for x in ('checkout of branch: ',
@@ -3183,18 +3196,18 @@ class Bazaar(VersionControl):
 
     def get_revision(self, location):
         revision = call_subprocess(
-            ['bzr', 'revno'], show_stdout=False, cwd=location)
+            [BZR_CMD, 'revno'], show_stdout=False, cwd=location)
         return revision.strip()
 
     def get_newest_revision(self, location):
         url = self.get_url(location)
         revision = call_subprocess(
-            ['bzr', 'revno', url], show_stdout=False, cwd=location)
+            [BZR_CMD, 'revno', url], show_stdout=False, cwd=location)
         return revision.strip()
 
     def get_tag_revs(self, location):
         tags = call_subprocess(
-            ['bzr', 'tags'], show_stdout=False, cwd=location)
+            [BZR_CMD, 'tags'], show_stdout=False, cwd=location)
         tag_revs = []
         for line in tags.splitlines():
             tags_match = re.search(r'([.\w-]+)\s*(.*)$', line)
