@@ -577,6 +577,9 @@ class FreezeCommand(Command):
         find_links = options.find_links or []
         ## FIXME: Obviously this should be settable:
         find_tags = False
+        skip_match = None
+        if os.environ.get('PIP_SKIP_REQUIREMENTS_REGEX'):
+            skip_match = re.compile(os.environ['PIP_SKIP_REQUIREMENTS_REGEX'])
 
         if filename == '-':
             logger.move_stdout_to_stderr()
@@ -606,6 +609,9 @@ class FreezeCommand(Command):
             req_f = open(requirement)
             for line in req_f:
                 if not line.strip() or line.strip().startswith('#'):
+                    f.write(line)
+                    continue
+                if skip_match and skip_match.search(line):
                     f.write(line)
                     continue
                 elif line.startswith('-e') or line.startswith('--editable'):
@@ -3441,6 +3447,15 @@ def parse_requirements(filename, finder, comes_from=None):
             ## FIXME: it would be nice to keep track of the source of
             ## the find_links:
             finder.find_links.append(line)
+        elif line.startswith('-i') or line.startswith('--index-url'):
+            if line.startswith('-i'):
+                line = line[2:].strip()
+            else:
+                line = line[len('--index-url'):].strip().lstrip('=')
+            finder.index_urls = [line]
+        elif line.startswith('--extra-index-url'):
+            line = line[len('--extra-index-url'):].strip().lstrip('=')
+            finder.index_urls.append(line)
         else:
             comes_from = '-r %s (line %s)' % (filename, line_number)
             if line.startswith('-e') or line.startswith('--editable'):
