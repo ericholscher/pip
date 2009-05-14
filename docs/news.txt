@@ -22,6 +22,12 @@ hg tip
 * Allow the ``-i`` and ``--extra-index-url`` options in requirements
   files.
 
+* Fix the way bundle components are unpacked and moved around, to make
+  bundles work.
+
+* Adds ``-s`` option to allow the access to the global site-packages if a
+  virtualenv is to be created.
+
 0.3.1
 -----
 
