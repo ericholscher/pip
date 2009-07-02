@@ -23,6 +23,8 @@ tip
 * Added download command to retrieve package archives. If given an editable
   package it will create an archives of it.
 
+* Added uninstall support.
+
 0.4
 ---
 
