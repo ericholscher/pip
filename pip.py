@@ -16,6 +16,7 @@ import posixpath
 import re
 import shutil
 import fnmatch
+import operator
 try:
     from hashlib import md5
 except ImportError:
@@ -40,6 +41,9 @@ class InstallationError(Exception):
 
 class DistributionNotFound(InstallationError):
     """Raised when a distribution cannot be found to satisfy a requirement"""
+
+class BadCommand(Exception):
+    """Raised when virtualenv is not found"""
 
 if getattr(sys, 'real_prefix', None):
     ## FIXME: is build/ a good name?
@@ -380,6 +384,12 @@ class InstallCommand(Command):
             action='append',
             default=[],
             help='extra URLs of package indexes to use in addition to --index-url')
+        self.parser.add_option(
+            '--no-index',
+            dest='no_index',
+            action='store_true',
+            default=False,
+            help='Ignore package index (only looking at --find-links URLs instead)')
 
         self.parser.add_option(
             '-b', '--build', '--build-dir', '--build-directory',
@@ -405,6 +415,12 @@ class InstallCommand(Command):
             action='store_true',
             help='Ignore the installed packages (reinstalling instead)')
         self.parser.add_option(
+            '--no-deps', '--no-dependencies',
+            dest='ignore_dependencies',
+            action='store_true',
+            default=False,
+            help='Ignore package dependencies')
+        self.parser.add_option(
             '--no-install',
             dest='no_install',
             action='store_true',
@@ -429,6 +445,9 @@ class InstallCommand(Command):
         options.src_dir = os.path.abspath(options.src_dir)
         install_options = options.install_options or []
         index_urls = [options.index_url] + options.extra_index_urls
+        if options.no_index:
+            logger.notify('Ignoring indexes: %s' % ','.join(index_urls))
+            index_urls = []
         finder = PackageFinder(
             find_links=options.find_links,
             index_urls=index_urls)
@@ -436,7 +455,8 @@ class InstallCommand(Command):
             build_dir=options.build_dir,
             src_dir=options.src_dir,
             upgrade=options.upgrade,
-            ignore_installed=options.ignore_installed)
+            ignore_installed=options.ignore_installed,
+            ignore_dependencies=options.ignore_dependencies)
         for name in args:
             requirement_set.add_requirement(
                 InstallRequirement.from_line(name, None))
@@ -1110,12 +1130,15 @@ class PackageFinder(object):
 
     def find_requirement(self, req, upgrade):
         url_name = req.url_name
-        # Check that we have the url_name correctly spelled:
-        main_index_url = Link(posixpath.join(self.index_urls[0], url_name))
-        # This will also cache the page, so it's okay that we get it again later:
-        page = self._get_page(main_index_url, req)
-        if page is None:
-            url_name = self._find_url_name(Link(self.index_urls[0]), url_name, req) or req.url_name
+        # Only check main index if index URL is given:
+        main_index_url = None
+        if self.index_urls:
+            # Check that we have the url_name correctly spelled:
+            main_index_url = Link(posixpath.join(self.index_urls[0], url_name))
+            # This will also cache the page, so it's okay that we get it again later:
+            page = self._get_page(main_index_url, req)
+            if page is None:
+                url_name = self._find_url_name(Link(self.index_urls[0]), url_name, req) or req.url_name
         def mkurl_pypi_url(url):
             loc =  posixpath.join(url, url_name)
             # For maximum compatibility with easy_install, ensure the path
@@ -1133,10 +1156,25 @@ class PackageFinder(object):
             locations = list(self.find_links)
         locations.extend(self.dependency_links)
         for version in req.absolute_versions:
-            if url_name is not None:
+            if url_name is not None and main_index_url is not None:
                 locations = [
-                    posixpath.join(url, url_name, version)] + locations
-        locations = [Link(url) for url in locations]
+                    posixpath.join(main_index_url.url, version)] + locations
+        file_locations = []
+        url_locations = []
+        for url in locations:
+            if url.startswith('file:'):
+                fn = url_to_filename(url)
+                if os.path.isdir(fn):
+                    path = os.path.realpath(fn)
+                    for item in os.listdir(path):
+                        file_locations.append(
+                            filename_to_url2(os.path.join(path, item)))
+                elif os.path.isfile(fn):
+                    file_locations.append(filename_to_url2(fn))
+            else:
+                url_locations.append(url)
+        
+        locations = [Link(url) for url in url_locations]
         logger.debug('URLs to search for versions for %s:' % req)
         for location in locations:
             logger.debug('* %s' % location)
@@ -1144,30 +1182,40 @@ class PackageFinder(object):
         found_versions.extend(
             self._package_versions(
                 [Link(url, '-f') for url in self.find_links], req.name.lower()))
+        page_versions = []
         for page in self._get_pages(locations, req):
             logger.debug('Analyzing links from page %s' % page.url)
             logger.indent += 2
             try:
-                found_versions.extend(self._package_versions(page.links, req.name.lower()))
+                page_versions.extend(self._package_versions(page.links, req.name.lower()))
             finally:
                 logger.indent -= 2
-        dependency_versions = list(self._package_versions([Link(url) for url in self.dependency_links], req.name.lower()))
+        dependency_versions = list(self._package_versions(
+            [Link(url) for url in self.dependency_links], req.name.lower()))
         if dependency_versions:
             logger.info('dependency_links found: %s' % ', '.join([link.url for parsed, link, version in dependency_versions]))
-            found_versions.extend(dependency_versions)
-        if not found_versions:
+        file_versions = list(self._package_versions(
+                [Link(url) for url in file_locations], req.name.lower()))
+        if not found_versions and not page_versions and not dependency_versions and not file_versions:
             logger.fatal('Could not find any downloads that satisfy the requirement %s' % req)
             raise DistributionNotFound('No distributions at all found for %s' % req)
         if req.satisfied_by is not None:
             found_versions.append((req.satisfied_by.parsed_version, Inf, req.satisfied_by.version))
-        found_versions.sort(reverse=True)
+        if file_versions:
+            file_versions.sort(reverse=True)
+            logger.info('Local files found: %s' % ', '.join([url_to_filename(link.url) for parsed, link, version in file_versions]))
+            found_versions = file_versions + found_versions
+        all_versions = found_versions + page_versions + dependency_versions
         applicable_versions = []
-        for (parsed_version, link, version) in found_versions:
+        for (parsed_version, link, version) in all_versions:
             if version not in req.req:
                 logger.info("Ignoring link %s, version %s doesn't match %s"
                             % (link, version, ','.join([''.join(s) for s in req.req.specs])))
                 continue
             applicable_versions.append((link, version))
+        applicable_versions = sorted(applicable_versions, key=operator.itemgetter(1),
+            cmp=lambda x, y : cmp(pkg_resources.parse_version(y), pkg_resources.parse_version(x))
+        )
         existing_applicable = bool([link for link, version in applicable_versions if link is Inf])
         if not upgrade and existing_applicable:
             if applicable_versions[0][1] is Inf:
@@ -1201,7 +1249,7 @@ class PackageFinder(object):
         page = self._get_page(index_url, req)
         if page is None:
             logger.fatal('Cannot fetch index base URL %s' % index_url)
-            raise DistributionNotFound('Cannot find requirement %s, nor fetch index URL %s' % (req, index_url))
+            return
         norm_name = normalize_name(req.url_name)
         for link in page.links:
             base = posixpath.basename(link.path.rstrip('/'))
@@ -1250,9 +1298,19 @@ class PackageFinder(object):
     _egg_info_re = re.compile(r'([a-z0-9_.]+)-([a-z0-9_.-]+)', re.I)
     _py_version_re = re.compile(r'-py([123]\.[0-9])$')
 
+    def _sort_links(self, links):
+        "Brings links in order, non-egg links first, egg links second"
+        eggs, no_eggs = [], []
+        for link in links:
+            if link.egg_fragment:
+                eggs.append(link)
+            else:
+                no_eggs.append(link)
+        return no_eggs + eggs
+
     def _package_versions(self, links, search_name):
         seen_links = {}
-        for link in links:
+        for link in self._sort_links(links):
             if link.url in seen_links:
                 continue
             seen_links[link.url] = None
@@ -1390,10 +1448,12 @@ class InstallRequirement(object):
                 s += '->' + comes_from
         return s
 
-    def build_location(self, build_dir):
+    def build_location(self, build_dir, unpack=True):
         if self._temp_build_dir is not None:
             return self._temp_build_dir
         if self.req is None:
+            if not unpack:
+                return os.path.join(build_dir, 'download')
             self._temp_build_dir = tempfile.mkdtemp('-build', 'pip-')
             self._ideal_build_dir = build_dir
             return self._temp_build_dir
@@ -1915,7 +1975,7 @@ deleted (unless you remove this file).
 
 class RequirementSet(object):
 
-    def __init__(self, build_dir, src_dir, upgrade=False, ignore_installed=False):
+    def __init__(self, build_dir, src_dir, upgrade=False, ignore_installed=False, ignore_dependencies=False):
         self.build_dir = build_dir
         self.src_dir = src_dir
         self.upgrade = upgrade
@@ -1924,6 +1984,7 @@ class RequirementSet(object):
         # Mapping of alias: real_name
         self.requirement_aliases = {}
         self.unnamed_requirements = []
+        self.ignore_dependencies = ignore_dependencies
 
     def __str__(self):
         reqs = [req for req in self.requirements.values()
@@ -2002,8 +2063,8 @@ class RequirementSet(object):
                     else:
                         req_to_install.run_egg_info()
                 elif install:
-                    location = req_to_install.build_location(self.build_dir)
-                    ## FIXME: is the existance of the checkout good enough to use it?  I'm don't think so.
+                    location = req_to_install.build_location(self.build_dir, not only_download)
+                    ## FIXME: is the existance of the checkout good enough to use it?  I don't think so.
                     unpack = True
                     if not os.path.exists(os.path.join(location, 'setup.py')):
                         ## FIXME: this won't upgrade when there's an existing package unpacked in `location`
@@ -2051,19 +2112,20 @@ class RequirementSet(object):
                     ## FIXME: shouldn't be globally added:
                     finder.add_dependency_links(req_to_install.dependency_links)
                     ## FIXME: add extras in here:
-                    for req in req_to_install.requirements():
-                        try:
-                            name = pkg_resources.Requirement.parse(req).project_name
-                        except ValueError, e:
-                            ## FIXME: proper warning
-                            logger.error('Invalid requirement: %r (%s) in requirement %s' % (req, e, req_to_install))
-                            continue
-                        if self.has_requirement(name):
-                            ## FIXME: check for conflict
-                            continue
-                        subreq = InstallRequirement(req, req_to_install)
-                        reqs.append(subreq)
-                        self.add_requirement(subreq)
+                    if not self.ignore_dependencies:
+                        for req in req_to_install.requirements():
+                            try:
+                                name = pkg_resources.Requirement.parse(req).project_name
+                            except ValueError, e:
+                                ## FIXME: proper warning
+                                logger.error('Invalid requirement: %r (%s) in requirement %s' % (req, e, req_to_install))
+                                continue
+                            if self.has_requirement(name):
+                                ## FIXME: check for conflict
+                                continue
+                            subreq = InstallRequirement(req, req_to_install)
+                            reqs.append(subreq)
+                            self.add_requirement(subreq)
                     if req_to_install.name not in self.requirements:
                         self.requirements[req_to_install.name] = req_to_install
                 else:
@@ -2441,11 +2503,11 @@ class HTMLPage(object):
         except (urllib2.HTTPError, urllib2.URLError, socket.timeout, socket.error), e:
             desc = str(e)
             if isinstance(e, socket.timeout):
-                log_meth = logger.warn
+                log_meth = logger.info
                 level =1
                 desc = 'timed out'
             elif isinstance(e, urllib2.URLError):
-                log_meth = logger.warn
+                log_meth = logger.info
                 if hasattr(e, 'reason') and isinstance(e.reason, socket.timeout):
                     desc = 'timed out'
                     level = 1
@@ -2456,7 +2518,7 @@ class HTMLPage(object):
                 log_meth = logger.info
                 level = 2
             else:
-                log_meth = logger.warn
+                log_meth = logger.info
                 level = 1
             log_meth('Could not fetch URL %s: %s' % (link, desc))
             log_meth('Will skip URL %s when looking for download links for %s' % (link.url, req))
@@ -2494,10 +2556,13 @@ class HTMLPage(object):
 
     @property
     def base_url(self):
-        match = self._base_re.search(self.content)
-        if match:
-            return match.group(1)
-        return self.url
+        if not hasattr(self, "_base_url"):
+            match = self._base_re.search(self.content)
+            if match:
+                self._base_url = match.group(1)
+            else:
+                self._base_url = self.url
+        return self._base_url
 
     @property
     def links(self):
@@ -4116,6 +4181,19 @@ def filename_to_url(filename):
     url = url.replace(os.path.sep, '/')
     url = url.lstrip('/')
     return 'file:///' + url
+
+def filename_to_url2(filename):
+    """
+    Convert a path to a file: URL.  The path will be made absolute and have
+    quoted path parts.
+    """
+    filename = os.path.normcase(os.path.abspath(filename))
+    drive, filename = os.path.splitdrive(filename)
+    filepath = filename.split(os.path.sep)
+    url = '/'.join([urllib.quote(part) for part in filepath])
+    if not drive:
+        url = url.lstrip('/')
+    return 'file:///' + drive + url
 
 def url_to_filename(url):
     """
