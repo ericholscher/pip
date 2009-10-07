@@ -20,14 +20,25 @@ tip
 
 * Fixed issue with Bazaar's bzr+ssh scheme.
 
-* Added download command to retrieve package archives. If given an editable
-  package it will create an archives of it.
+* Added --download-dir option to the install command to retrieve package
+  archives. If given an editable package it will create an archive of it.
 
-* Added ability to pass local file and directory paths to --find-links, e.g.
-  --find-links=file:///path/to/my/private/archive
+* Added ability to pass local file and directory paths to ``--find-links``,
+  e.g. ``--find-links=file:///path/to/my/private/archive``
 
 * Reduced the amount of console log messages when fetching a page to find a
   distribution was problematic. The full messages can be found in pip-log.txt.
+
+* Added ``--no-deps`` option to install ignore package dependencies
+
+* Added ``--no-index`` option to ignore the package index (PyPI) temporarily
+
+* Fixed installing editable packages from Git branches.
+
+* Fixes freezing of editable packages from Mercurial repositories.
+
+* Fixed handling read-only attributes of build files, e.g. of Subversion and
+  Bazaar on Windows.
 
 * When downloading a file from a redirect, use the redirected
   location's extension to guess the compression (happens specifically
