@@ -1864,7 +1864,8 @@ execfile(__file__)
                 [sys.executable, '-c',
                  "import setuptools; __file__=%r; execfile(%r)" % (self.setup_py, self.setup_py),
                  'test'],
-                cwd=self.source_dir, show_stdout=False)
+                #Would be nice to raise on return, but not print!
+                cwd=self.source_dir, show_stdout=False, raise_on_returncode=True)
             logger.notify('Ran tests for %s' % self.name)
         finally:
             logger.indent -= 2
@@ -2479,9 +2480,10 @@ class RequirementSet(object):
             for requirement in to_test:
                 try:
                     requirement.test()
-                except:
+                    logger.notify("WOOOOOOO %s TESTS PASS" % requirement.name)
+                except Exception, e:
                     # if install did not succeed, rollback previous uninstall
-                    logger.notify("OMG %s DIDNT PASS TESTS" % requirement)
+                    logger.notify("OMG %s DIDNT PASS TESTS" % requirement.name)
                     #raise
         finally:
             logger.indent -= 2
@@ -4100,9 +4102,11 @@ def call_subprocess(cmd, show_stdout=True,
     proc.wait()
     if proc.returncode:
         if raise_on_returncode:
+            """
             if all_output:
                 logger.notify('Complete output from command %s:' % command_desc)
                 logger.notify('\n'.join(all_output) + '\n----------------------------------------')
+            """
             raise InstallationError(
                 "Command %s failed with error code %s"
                 % (command_desc, proc.returncode))
