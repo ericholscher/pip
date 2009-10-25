@@ -2482,8 +2482,9 @@ class RequirementSet(object):
                     requirement.test()
                     logger.notify("WOOOOOOO %s TESTS PASS" % requirement.name)
                 except Exception, e:
-                    # if install did not succeed, rollback previous uninstall
                     logger.notify("OMG %s DIDNT PASS TESTS" % requirement.name)
+                    #We don't want to raise here yet, because a lot of
+                    #packages in the wild will fail tests.
                     #raise
         finally:
             logger.indent -= 2
