@@ -457,6 +457,12 @@ class InstallCommand(Command):
             help="Download and unpack all packages, but don't actually install them")
 
         self.parser.add_option(
+            '--test',
+            dest='test',
+            action='store_true',
+            help="Run setup.py test on packages are they are installed.")
+
+        self.parser.add_option(
             '--install-option',
             dest='install_options',
             action='append',
@@ -503,6 +509,8 @@ class InstallCommand(Command):
                 requirement_set.add_requirement(req)
         requirement_set.install_files(finder, force_root_egg_info=self.bundle)
         if not options.no_install and not self.bundle:
+            if options.test:
+                requirement_set.test()
             requirement_set.install(install_options)
             installed = ' '.join([req.name for req in
                                   requirement_set.successfully_installed])
@@ -1847,6 +1855,20 @@ execfile(__file__)
         name = name.replace(os.path.sep, '/')
         return name
 
+
+    def test(self):
+        logger.notify('Running setup.py test for %s' % self.name)
+        logger.indent += 2
+        try:
+            call_subprocess(
+                [sys.executable, '-c',
+                 "import setuptools; __file__=%r; execfile(%r)" % (self.setup_py, self.setup_py),
+                 'test'],
+                cwd=self.source_dir, show_stdout=False)
+            logger.notify('Ran tests for %s' % self.name)
+        finally:
+            logger.indent -= 2
+
     def install(self, install_options):
         if self.editable:
             self.install_editable()
@@ -2445,6 +2467,25 @@ class RequirementSet(object):
                     fp.close()
         finally:
             tar.close()
+
+    def test(self):
+        to_test = sorted([r for r in self.requirements.values()
+                             if self.upgrade or not r.satisfied_by],
+                            key=lambda p: p.name.lower())
+        if to_test:
+            logger.notify('Testing collected packages: %s' % (', '.join([req.name for req in to_test])))
+        logger.indent += 2
+        try:
+            for requirement in to_test:
+                try:
+                    requirement.test()
+                except:
+                    # if install did not succeed, rollback previous uninstall
+                    logger.notify("OMG %s DIDNT PASS TESTS" % requirement)
+                    #raise
+        finally:
+            logger.indent -= 2
+        self.successfully_tested = to_test
 
     def install(self, install_options):
         """Install everything in this set (after having downloaded and unpacked the packages)"""
@@ -4500,7 +4541,7 @@ class FakeFile(object):
             return self._gen.next()
         except StopIteration:
             return ''
-    
+
 def splitext(path):
     """Like os.path.splitext, but take off .tar too"""
     base, ext = posixpath.splitext(path)
