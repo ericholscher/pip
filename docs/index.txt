@@ -83,7 +83,7 @@ Uninstall
 ---------
 
 pip is able to uninstall most installed packages with ``pip uninstall
-package-name``. 
+package-name``.
 
 Known exceptions include pure-distutils packages installed with
 ``python setup.py install`` (such packages leave behind no metadata allowing
@@ -105,7 +105,7 @@ When installing software, and Python packages in particular, it's common that
 you get a lot of libraries installed.  You just did ``easy_install MyPackage``
 and you get a dozen packages.  Each of these packages has its own version.
 
-Maybe you ran that installation and it works.  Great!  Will it keep working? 
+Maybe you ran that installation and it works.  Great!  Will it keep working?
 Did you have to provide special options to get it to find everything?  Did you
 have to install a bunch of other optional pieces?  Most of all, will you be able
 to do it again?
@@ -170,7 +170,7 @@ Bundles
 Another way to distribute a set of libraries is a bundle format (specific to
 pip).  This format is not stable at this time (there simply hasn't been
 any feedback, nor a great deal of thought).  A bundle file contains all the
-source for your package, and you can have pip install them all together. 
+source for your package, and you can have pip install them all together.
 Once you have the bundle file further network access won't be necessary.  To
 build a bundle file, do::
 
@@ -235,3 +235,13 @@ Do so by adding the line::
     export PIP_VIRTUALENV_BASE=$WORKON_HOME
 
 in your .bashrc under the line starting with ``export WORKON_HOME``.
+
+
+Testing Applications
+--------------------
+
+Pip allows you to test the applications that you are installing, to check that they work on your system. This is a completely optional feature, but can be enabled when you use the `pip install` command. For example::
+
+    pip install --test wsgiref
+
+Would install the wsgiref package, and run `setup.py test` for that application. This is currently just a sanity check, and the test results will have no effect on whether the package installs or not. However, if the tests fail, that will be a warning for you, that the package may not work on your current environment.

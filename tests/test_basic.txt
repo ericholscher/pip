@@ -28,6 +28,19 @@ Let's try that again, editable::
     >>> assert "--editable=INITools==0.2 should be formatted with svn+URL" in result.stdout
     >>> assert len(result.files_created) == 1 and not result.files_updated
 
+Let's try checking out and testing, tests fail but should still install::
+
+    >>> reset_env()
+    >>> result = run_pip('install', '--test', '-e', 'git://github.com/ericholscher/django-test-utils.git@53f317dc91787e048c46555088f98d066537b889#egg=django-test-utils', expect_error=True)
+    >>> assert "Tests for django-test-utils FAILED" in result.stdout
+    >>> assert "Adding django-test-utils 0.3 to easy-install.pth file" in result.stdout
+
+Let's try checking out and testing, tests should pass::
+
+    >>> reset_env()
+    >>> result = run_pip('install', '--test', '--upgrade', 'wsgiref', expect_error=True)
+    >>> assert "Tests for wsgiref OK" in result.stdout
+
 Now, checking out from svn::
 
     >>> reset_env()
@@ -93,4 +106,3 @@ Urlquoted characters are normalized for repo URL comparison::
 
     >>> result = run_pip('install', '-e', 'bzr+http://bazaar.launchpad.net/~jezdez/pip-test/test#egg=pip-test', expect_error=True)
     >>> assert 'pip-log.txt' not in result.files_created, result.files_created['pip-log.txt'].bytes
-

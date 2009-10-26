@@ -1865,8 +1865,7 @@ execfile(__file__)
                  "import setuptools; __file__=%r; execfile(%r)" % (self.setup_py, self.setup_py),
                  'test'],
                 #Would be nice to raise on return, but not print!
-                cwd=self.source_dir, show_stdout=False, raise_on_returncode=True)
-            logger.notify('Ran tests for %s' % self.name)
+                cwd=self.source_dir, show_stdout=True, raise_on_returncode=True)
         finally:
             logger.indent -= 2
 
@@ -2480,9 +2479,9 @@ class RequirementSet(object):
             for requirement in to_test:
                 try:
                     requirement.test()
-                    logger.notify("WOOOOOOO %s TESTS PASS" % requirement.name)
+                    logger.notify("Tests for %s OK" % requirement.name)
                 except Exception, e:
-                    logger.notify("OMG %s DIDNT PASS TESTS" % requirement.name)
+                    logger.notify("Tests for %s FAILED" % requirement.name)
                     #We don't want to raise here yet, because a lot of
                     #packages in the wild will fail tests.
                     #raise
